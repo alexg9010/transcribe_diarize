@@ -39,7 +39,7 @@ powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | ie
 
 No need to manually create a virtualenv or install packages — uv reads the inline dependency metadata at the top of the script and handles everything automatically on first run.
 
-> **GPU users (optional):** If you have a CUDA-capable GPU, uv will install CPU-only PyTorch by default. To get the CUDA build, install it manually into uv's managed env or use a `uv.lock`-based project. The script detects and uses CUDA automatically if available.
+> **GPU users (optional):** If you have a CUDA-capable GPU, uv will install CPU-only PyTorch by default. To get the CUDA build, install it manually into uv's managed env. The script detects and uses CUDA/MPS automatically if available.
 
 ### 2. Accept the pyannote model terms
 
@@ -71,6 +71,12 @@ $env:HF_TOKEN="your_token_here"
 
 ```bash
 uv run transcribe_diarize.py <audio_file> [options]
+```
+
+To see all available options:
+
+```bash
+uv run transcribe_diarize.py --help
 ```
 
 ### Options
@@ -163,5 +169,7 @@ Pass `--num_speakers N` if you know the count. Also try `--model small` or large
 ---
 
 ## License
+
+This project is released under the [MIT License](LICENSE).
 
 Whisper is released under the [MIT License](https://github.com/openai/whisper/blob/main/LICENSE). pyannote.audio is released under the [MIT License](https://github.com/pyannote/pyannote-audio/blob/develop/LICENSE.txt). Check each project's terms for your use case.
