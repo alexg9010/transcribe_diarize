@@ -87,7 +87,9 @@ uv run transcribe_diarize.py --help
 | `--hf_token` | `$HF_TOKEN` | Hugging Face access token |
 | `--num_speakers` | auto | Number of speakers if known — improves diarization accuracy |
 | `--output` | `<name>_transcript.txt` | Output path. Use `.json` extension for structured output |
-| `--summarize` | off | Append a conversation summary using a local BART model |
+| `--summarize` | off | Summarize the transcript using Ollama |
+| `--ollama-model` | `llama3.2` | Ollama model for summarization |
+| `--speakers` | — | Map speaker labels to names, e.g. `'SPEAKER_00=Alex,SPEAKER_01=Ahmed'` |
 | `--force` | off | Re-run transcription even if output file already exists |
 
 ### Examples
@@ -105,8 +107,14 @@ uv run transcribe_diarize.py interview.m4a --num_speakers 2
 # Save as JSON
 uv run transcribe_diarize.py interview.m4a --output interview.json
 
-# With automatic summary
+# Summarize with Ollama (requires ollama to be installed)
 uv run transcribe_diarize.py interview.m4a --summarize
+
+# Summarize with speaker names
+uv run transcribe_diarize.py interview.m4a --summarize --speakers 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
+
+# Use a different Ollama model
+uv run transcribe_diarize.py interview.m4a --summarize --ollama-model mistral
 
 # All options
 uv run transcribe_diarize.py interview.m4a --model large --num_speakers 3 --summarize --output result.txt
@@ -167,23 +175,28 @@ Pass `--num_speakers N` if you know the count. Also try `--model small` or large
 
 ## Summarization
 
-### Built-in (BART)
-
-Use `--summarize` for a quick local summary powered by [philschmid/bart-large-cnn-samsum](https://huggingface.co/philschmid/bart-large-cnn-samsum), a BART model fine-tuned on dialogue (~1.6 GB, first run downloads the model). Works well for short-to-medium conversations.
-
-### Ollama (higher quality)
-
-For longer or more nuanced conversations, pipe the transcript into Ollama with the included prompt template:
+Summarization uses [Ollama](https://ollama.com) to run a local LLM. Install Ollama and pull a model before using `--summarize`:
 
 ```bash
-# Generate transcript first
-uv run transcribe_diarize.py interview.m4a
+# Install Ollama (see https://ollama.com for other platforms)
+brew install ollama
 
-# Then summarize with Ollama
-cat prompt_summarize.txt interview_transcript.txt | ollama run llama3.2
+# Pull a model
+ollama pull llama3.2
 ```
 
-The prompt template (`prompt_summarize.txt`) produces a structured summary with overview, key points, action items, and per-speaker breakdown. Edit it to suit your needs.
+The `--summarize` flag sends the transcript to Ollama with a prompt template (`prompt_summarize.txt`) that:
+
+1. **Infers speaker identities** from context clues (introductions, names mentioned)
+2. **Produces a structured summary** with overview, key points, and action items
+
+If the LLM can't identify speakers, use `--speakers` to provide names manually:
+
+```bash
+uv run transcribe_diarize.py meeting.m4a --summarize --speakers 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
+```
+
+You can customize `prompt_summarize.txt` to change the summary format, or use a different model with `--ollama-model`.
 
 ---
 
