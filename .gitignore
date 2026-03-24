@@ -13,6 +13,7 @@ wheels/
 .env
 .envrc
 .env.*
+!.env.example
 
 # Audio files and outputs
 *.m4a
