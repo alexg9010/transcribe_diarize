@@ -87,6 +87,8 @@ uv run transcribe_diarize.py --help
 | `--hf_token` | `$HF_TOKEN` | Hugging Face access token |
 | `--num_speakers` | auto | Number of speakers if known — improves diarization accuracy |
 | `--output` | `<name>_transcript.txt` | Output path. Use `.json` extension for structured output |
+| `--summarize` | off | Append a conversation summary using a local BART model |
+| `--force` | off | Re-run transcription even if output file already exists |
 
 ### Examples
 
@@ -103,8 +105,11 @@ uv run transcribe_diarize.py interview.m4a --num_speakers 2
 # Save as JSON
 uv run transcribe_diarize.py interview.m4a --output interview.json
 
+# With automatic summary
+uv run transcribe_diarize.py interview.m4a --summarize
+
 # All options
-uv run transcribe_diarize.py interview.m4a --model large --num_speakers 3 --output result.txt
+uv run transcribe_diarize.py interview.m4a --model large --num_speakers 3 --summarize --output result.txt
 ```
 
 ---
@@ -157,6 +162,28 @@ Try a smaller `--model`, or ensure no other large processes are using your GPU/R
 
 **Poor speaker separation**
 Pass `--num_speakers N` if you know the count. Also try `--model small` or larger — better transcription helps alignment.
+
+---
+
+## Summarization
+
+### Built-in (BART)
+
+Use `--summarize` for a quick local summary powered by [philschmid/bart-large-cnn-samsum](https://huggingface.co/philschmid/bart-large-cnn-samsum), a BART model fine-tuned on dialogue (~1.6 GB, first run downloads the model). Works well for short-to-medium conversations.
+
+### Ollama (higher quality)
+
+For longer or more nuanced conversations, pipe the transcript into Ollama with the included prompt template:
+
+```bash
+# Generate transcript first
+uv run transcribe_diarize.py interview.m4a
+
+# Then summarize with Ollama
+cat prompt_summarize.txt interview_transcript.txt | ollama run llama3.2
+```
+
+The prompt template (`prompt_summarize.txt`) produces a structured summary with overview, key points, action items, and per-speaker breakdown. Edit it to suit your needs.
 
 ---
 

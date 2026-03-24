@@ -10,6 +10,7 @@ dependencies = [
     "pyannote.audio==4.0.0",
     "torch==2.8.0",
     "torchaudio==2.8.0",
+    "transformers",
     "python-dotenv",
 ]
 
