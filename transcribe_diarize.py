@@ -213,10 +213,17 @@ def apply_speaker_names(text: str, speakers: dict[str, str]) -> str:
 
 
 def parse_speakers(speakers_str: str) -> dict[str, str]:
-    """Parse 'SPEAKER_00=Alex,SPEAKER_01=Ahmed' into a dict."""
+    """Parse speaker mappings.
+
+    Accepts either format:
+      - Ordered list:  'Alex,Ahmed'        → SPEAKER_00=Alex, SPEAKER_01=Ahmed
+      - Explicit map:  'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
+    """
+    parts = [p.strip() for p in speakers_str.split(",")]
+    if "=" not in speakers_str:
+        return {f"SPEAKER_{i:02d}": name for i, name in enumerate(parts)}
     mapping = {}
-    for pair in speakers_str.split(","):
-        pair = pair.strip()
+    for pair in parts:
         if "=" not in pair:
             print(f"Warning: ignoring invalid speaker mapping '{pair}' (expected KEY=VALUE)", file=sys.stderr)
             continue
@@ -280,7 +287,7 @@ def main():
     parser.add_argument("--ollama-model", default="llama3.2",
                         help="Ollama model to use for summarization (default: llama3.2).")
     parser.add_argument("--speakers", default=None,
-                        help="Map speaker labels to names, e.g. 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'.")
+                        help="Speaker names: 'Alex,Ahmed' (by order) or 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run transcription even if output file already exists.")
     args = parser.parse_args()

@@ -89,7 +89,7 @@ uv run transcribe_diarize.py --help
 | `--output` | `<name>_transcript.txt` | Output path. Use `.json` extension for structured output |
 | `--summarize` | off | Summarize the transcript using Ollama |
 | `--ollama-model` | `llama3.2` | Ollama model for summarization |
-| `--speakers` | — | Map speaker labels to names, e.g. `'SPEAKER_00=Alex,SPEAKER_01=Ahmed'` |
+| `--speakers` | — | Speaker names: `'Alex,Ahmed'` (by order) or `'SPEAKER_00=Alex,SPEAKER_01=Ahmed'` |
 | `--force` | off | Re-run transcription even if output file already exists |
 
 ### Examples
@@ -110,8 +110,8 @@ uv run transcribe_diarize.py interview.m4a --output interview.json
 # Summarize with Ollama (requires ollama to be installed)
 uv run transcribe_diarize.py interview.m4a --summarize
 
-# Summarize with speaker names
-uv run transcribe_diarize.py interview.m4a --summarize --speakers 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
+# Summarize with speaker names (in order of appearance)
+uv run transcribe_diarize.py interview.m4a --summarize --speakers 'Alex,Ahmed'
 
 # Use a different Ollama model
 uv run transcribe_diarize.py interview.m4a --summarize --ollama-model mistral
