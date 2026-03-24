@@ -224,16 +224,29 @@ def main():
                         help="Number of speakers if known (optional, improves accuracy).")
     parser.add_argument("--output", default=None,
                         help="Output file path (default: <audio_name>_transcript.txt). Use .json for raw JSON.")
+    parser.add_argument("--force", action="store_true",
+                        help="Re-run transcription even if output file already exists.")
     args = parser.parse_args()
-
-    if not args.hf_token:
-        print("Error: Hugging Face token required. Pass --hf_token or set HF_TOKEN env var.")
-        print("Get a token at: https://huggingface.co/settings/tokens")
-        sys.exit(1)
 
     audio_path = args.audio
     if not Path(audio_path).exists():
         print(f"Error: File not found: {audio_path}")
+        sys.exit(1)
+
+    stem = Path(audio_path).stem
+    out_path = args.output or f"{stem}_transcript.txt"
+    out_file = Path(out_path)
+    if out_file.parent != Path("."):
+        out_file.parent.mkdir(parents=True, exist_ok=True)
+
+    if out_file.exists() and not args.force:
+        print(f"Transcript already exists: {out_file}")
+        print("Use --force to re-run.")
+        return
+
+    if not args.hf_token:
+        print("Error: Hugging Face token required. Pass --hf_token or set HF_TOKEN env var.")
+        print("Get a token at: https://huggingface.co/settings/tokens")
         sys.exit(1)
 
     ensure_ffmpeg_available()
@@ -245,12 +258,6 @@ def main():
     except KeyboardInterrupt:
         print("\nCancelled.")
         sys.exit(130)
-
-    stem = Path(audio_path).stem
-    out_path = args.output or f"{stem}_transcript.txt"
-    out_file = Path(out_path)
-    if out_file.parent != Path("."):
-        out_file.parent.mkdir(parents=True, exist_ok=True)
 
     if out_path.endswith(".json"):
         with open(out_file, "w", encoding="utf-8") as f:
