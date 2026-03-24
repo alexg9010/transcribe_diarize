@@ -57,10 +57,12 @@ def configure_warning_filters():
 def require_dependency(import_name: str, package_name: str):
     """Import a runtime dependency with a useful install hint on failure."""
     try:
-        module = __import__(import_name, fromlist=["*"])
+        module = __import__(import_name)
+        for part in import_name.split(".")[1:]:
+            module = getattr(module, part)
     except ImportError as exc:
         print(
-            f"Error: missing dependency '{package_name}'. "
+            f"Error: missing dependency '{package_name}' ({exc}). "
             f"Run this script via `uv run transcribe_diarize.py ...` or install {package_name}.",
             file=sys.stderr,
         )
