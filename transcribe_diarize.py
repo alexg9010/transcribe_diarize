@@ -5,7 +5,6 @@
 #   "pyannote.audio==4.0.0",
 #   "torch==2.8.0",
 #   "torchaudio==2.8.0",
-#   "transformers",
 #   "python-dotenv",
 # ]
 # ///
@@ -23,6 +22,7 @@ import functools
 import json
 import os
 import shutil
+import subprocess
 import sys
 import warnings
 from pathlib import Path
@@ -51,11 +51,6 @@ def configure_warning_filters():
         "ignore",
         category=UserWarning,
         module=r"speechbrain\.utils\.torch_audio_backend",
-    )
-    warnings.filterwarnings(
-        "ignore",
-        category=FutureWarning,
-        module=r"transformers",
     )
 
 
@@ -210,67 +205,54 @@ def format_output(segments: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-def _load_summarizer():
-    """Load BART summarization model and tokenizer."""
-    transformers = require_dependency("transformers", "transformers")
-    model_name = "philschmid/bart-large-cnn-samsum"
-    print(f"Loading summarization model ({model_name})...")
-    import logging
-    logging.getLogger("transformers").setLevel(logging.ERROR)
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-    model = transformers.AutoModelForSeq2SeqLM.from_pretrained(model_name)
-    return model, tokenizer
+def apply_speaker_names(text: str, speakers: dict[str, str]) -> str:
+    """Replace SPEAKER_XX labels with provided names."""
+    for label, name in speakers.items():
+        text = text.replace(label, name)
+    return text
 
 
-def _run_summarizer(model, tokenizer, text: str, max_length: int = 150, min_length: int = 30) -> str:
-    """Run a single summarization pass."""
-    torch = require_dependency("torch", "torch")
-    inputs = tokenizer(text, return_tensors="pt", max_length=1024, truncation=True)
-    with torch.no_grad():
-        output_ids = model.generate(
-            **inputs, max_length=max_length, min_length=min_length, do_sample=False,
-        )
-    return tokenizer.decode(output_ids[0], skip_special_tokens=True)
+def parse_speakers(speakers_str: str) -> dict[str, str]:
+    """Parse 'SPEAKER_00=Alex,SPEAKER_01=Ahmed' into a dict."""
+    mapping = {}
+    for pair in speakers_str.split(","):
+        pair = pair.strip()
+        if "=" not in pair:
+            print(f"Warning: ignoring invalid speaker mapping '{pair}' (expected KEY=VALUE)", file=sys.stderr)
+            continue
+        label, name = pair.split("=", 1)
+        mapping[label.strip()] = name.strip()
+    return mapping
 
 
-def summarize(transcript: str, max_chunk_chars: int = 3000) -> str:
-    """Summarize a speaker-labeled transcript using BART fine-tuned on SAMSum dialogue."""
-    model, tokenizer = _load_summarizer()
-
-    if len(transcript) <= max_chunk_chars:
-        return _run_summarizer(model, tokenizer, transcript)
-
-    chunks = _split_transcript_chunks(transcript, max_chunk_chars)
-    summaries = []
-    for i, chunk in enumerate(chunks, 1):
-        print(f"  Summarizing chunk {i}/{len(chunks)}...")
-        summaries.append(_run_summarizer(model, tokenizer, chunk))
-
-    combined = " ".join(summaries)
-    print("  Combining chunk summaries...")
-    return _run_summarizer(model, tokenizer, combined, max_length=200, min_length=50)
+def load_prompt_template() -> str:
+    """Load the summarization prompt template from prompt_summarize.txt."""
+    prompt_path = Path(__file__).parent / "prompt_summarize.txt"
+    if not prompt_path.exists():
+        print(f"Error: prompt template not found: {prompt_path}", file=sys.stderr)
+        raise SystemExit(1)
+    return prompt_path.read_text(encoding="utf-8")
 
 
-def _split_transcript_chunks(transcript: str, max_chars: int) -> list[str]:
-    """Split transcript at speaker boundaries to stay within max_chars per chunk."""
-    blocks = transcript.split("\n\n")
-    chunks = []
-    current = []
-    current_len = 0
+def summarize(transcript: str, ollama_model: str = "llama3.2") -> str:
+    """Summarize a transcript using Ollama."""
+    if shutil.which("ollama") is None:
+        print("Error: ollama not found in PATH. Install from https://ollama.com", file=sys.stderr)
+        raise SystemExit(1)
 
-    for block in blocks:
-        block_len = len(block) + 2  # account for \n\n separator
-        if current and current_len + block_len > max_chars:
-            chunks.append("\n\n".join(current))
-            current = [block]
-            current_len = block_len
-        else:
-            current.append(block)
-            current_len += block_len
+    prompt = load_prompt_template() + transcript
 
-    if current:
-        chunks.append("\n\n".join(current))
-    return chunks
+    print(f"Summarizing with {ollama_model}...")
+    result = subprocess.run(
+        ["ollama", "run", ollama_model],
+        input=prompt,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        print(f"Error: ollama failed: {result.stderr.strip()}", file=sys.stderr)
+        raise SystemExit(1)
+    return result.stdout.strip()
 
 
 def fmt_time(seconds: float) -> str:
@@ -294,7 +276,11 @@ def main():
     parser.add_argument("--output", default=None,
                         help="Output file path (default: <audio_name>_transcript.txt). Use .json for raw JSON.")
     parser.add_argument("--summarize", action="store_true",
-                        help="Append a summary using a local BART model (philschmid/bart-large-cnn-samsum).")
+                        help="Summarize the transcript using Ollama (requires ollama to be installed).")
+    parser.add_argument("--ollama-model", default="llama3.2",
+                        help="Ollama model to use for summarization (default: llama3.2).")
+    parser.add_argument("--speakers", default=None,
+                        help="Map speaker labels to names, e.g. 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run transcription even if output file already exists.")
     args = parser.parse_args()
@@ -310,6 +296,8 @@ def main():
     if out_file.parent != Path("."):
         out_file.parent.mkdir(parents=True, exist_ok=True)
 
+    speaker_map = parse_speakers(args.speakers) if args.speakers else {}
+
     if out_file.exists() and not args.force:
         print(f"Transcript already exists: {out_file}")
         if args.summarize:
@@ -322,8 +310,10 @@ def main():
             else:
                 with open(out_file, encoding="utf-8") as f:
                     transcript = f.read()
-            summary = summarize(transcript)
-            print(f"\n{'='*60}\nSUMMARY\n{'='*60}\n{summary}\n")
+            if speaker_map:
+                transcript = apply_speaker_names(transcript, speaker_map)
+            summary = summarize(transcript, ollama_model=args.ollama_model)
+            print(f"\n{summary}\n")
         else:
             print("Use --force to re-run, or --summarize to summarize the existing transcript.")
         return
@@ -344,10 +334,13 @@ def main():
         sys.exit(130)
 
     transcript = format_output(labeled)
+    if speaker_map:
+        transcript = apply_speaker_names(transcript, speaker_map)
+
     summary = None
     if args.summarize:
-        summary = summarize(transcript)
-        print(f"\n{'='*60}\nSUMMARY\n{'='*60}\n{summary}\n")
+        summary = summarize(transcript, ollama_model=args.ollama_model)
+        print(f"\n{summary}\n")
 
     if out_path.endswith(".json"):
         output_data = labeled
@@ -359,7 +352,7 @@ def main():
     else:
         content = transcript
         if summary:
-            content += f"\n\n{'='*60}\nSUMMARY\n{'='*60}\n{summary}\n"
+            content += f"\n\n{summary}\n"
         with open(out_file, "w", encoding="utf-8") as f:
             f.write(content)
         print(f"Saved transcript to {out_file}")
