@@ -344,25 +344,21 @@ def main():
     if speaker_map:
         transcript = apply_speaker_names(transcript, speaker_map)
 
-    summary = None
+    if out_path.endswith(".json"):
+        with open(out_file, "w", encoding="utf-8") as f:
+            json.dump(labeled, f, indent=2, ensure_ascii=False)
+    else:
+        with open(out_file, "w", encoding="utf-8") as f:
+            f.write(transcript)
+    print(f"Saved transcript to {out_file}")
+
     if args.summarize:
         summary = summarize(transcript, ollama_model=args.ollama_model)
         print(f"\n{summary}\n")
-
-    if out_path.endswith(".json"):
-        output_data = labeled
-        if summary:
-            output_data = {"segments": labeled, "summary": summary}
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2, ensure_ascii=False)
-        print(f"Saved JSON to {out_file}")
-    else:
-        content = transcript
-        if summary:
-            content += f"\n\n{summary}\n"
-        with open(out_file, "w", encoding="utf-8") as f:
-            f.write(content)
-        print(f"Saved transcript to {out_file}")
+        summary_file = out_file.with_suffix(".summary.md")
+        with open(summary_file, "w", encoding="utf-8") as f:
+            f.write(summary + "\n")
+        print(f"Saved summary to {summary_file}")
 
 
 if __name__ == "__main__":
