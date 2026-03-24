@@ -9,35 +9,16 @@
 # ]
 # ///
 """
-transcribe_diarize.py
-Transcribes an audio file with speaker diarization using
-Whisper (transcription) + pyannote.audio (speaker segmentation).
+Transcribe an audio file with speaker diarization using
+Whisper (transcription) and pyannote.audio 4.x (speaker segmentation).
 
-SETUP
------
-1. Install uv if you haven't already:
-   https://docs.astral.sh/uv/getting-started/installation/
-
-2. Accept the pyannote community diarization model terms on Hugging Face:
-   - https://huggingface.co/pyannote/speaker-diarization-community-1
-   (Create a free account and accept the model card.)
-
-3. Create a Hugging Face access token:
-   https://huggingface.co/settings/tokens
-   (Read-only is enough.)
-
-4. Run (uv handles the venv and installs dependencies automatically):
-   uv run transcribe_diarize.py audio1705062906.m4a --hf_token YOUR_TOKEN_HERE
-
-   Or set the env var so you don't have to type it each time:
-   export HF_TOKEN=YOUR_TOKEN_HERE
-   uv run transcribe_diarize.py audio1705062906.m4a
+Uses the pyannote/speaker-diarization-community-1 pipeline.
+See README.md for full setup instructions and usage examples.
 """
 
 import argparse
 import contextlib
 import functools
-import inspect
 import json
 import os
 import shutil
@@ -97,26 +78,6 @@ def choose_device(torch_module) -> str:
     return "cpu"
 
 
-def patch_hf_download_compat(pyannote_audio_module):
-    """Bridge older pyannote auth kwargs to newer huggingface_hub versions."""
-    huggingface_hub = require_dependency("huggingface_hub", "huggingface_hub")
-    hf_signature = inspect.signature(huggingface_hub.hf_hub_download)
-    if "use_auth_token" in hf_signature.parameters:
-        return
-
-    pipeline_module = pyannote_audio_module.core.pipeline
-    if not hasattr(pipeline_module, "hf_hub_download"):
-        return
-    original_download = pipeline_module.hf_hub_download
-
-    def compat_hf_hub_download(*args, **kwargs):
-        if "use_auth_token" in kwargs and "token" not in kwargs:
-            kwargs["token"] = kwargs.pop("use_auth_token")
-        return original_download(*args, **kwargs)
-
-    pipeline_module.hf_hub_download = compat_hf_hub_download
-
-
 def load_audio_for_pyannote(audio_path: str):
     """Preload audio with Whisper/ffmpeg to avoid pyannote's torchcodec decoder path."""
     torch = require_dependency("torch", "torch")
@@ -165,16 +126,13 @@ def diarize(audio_path: str, hf_token: str, num_speakers: int | None = None) -> 
     """Run pyannote diarization and return annotation object."""
     torch = require_dependency("torch", "torch")
     pyannote_audio = require_dependency("pyannote.audio", "pyannote.audio")
-    patch_hf_download_compat(pyannote_audio)
     Pipeline = pyannote_audio.Pipeline
 
     print("Running speaker diarization...")
-    pipeline_signature = inspect.signature(Pipeline.from_pretrained)
-    auth_kwarg = "token" if "token" in pipeline_signature.parameters else "use_auth_token"
     with pyannote_torch_load_compat(torch):
         pipeline = Pipeline.from_pretrained(
             "pyannote/speaker-diarization-community-1",
-            **{auth_kwarg: hf_token},
+            token=hf_token,
         )
     device = choose_device(torch)
     if device != "cpu":
@@ -198,14 +156,17 @@ def get_annotation_from_diarization(diarization) -> object:
 def assign_speakers(segments: list[dict], diarization) -> list[dict]:
     """Match each Whisper segment to the dominant diarized speaker."""
     annotation = get_annotation_from_diarization(diarization)
+    tracks = list(annotation.itertracks(yield_label=True))
     results = []
     for seg in segments:
         seg_start, seg_end = seg["start"], seg["end"]
         speaker_time: dict[str, float] = {}
-        for turn, _, speaker in annotation.itertracks(yield_label=True):
-            overlap_start = max(seg_start, turn.start)
-            overlap_end = min(seg_end, turn.end)
-            overlap = max(0.0, overlap_end - overlap_start)
+        for turn, _, speaker in tracks:
+            if turn.end <= seg_start:
+                continue
+            if turn.start >= seg_end:
+                break
+            overlap = min(seg_end, turn.end) - max(seg_start, turn.start)
             if overlap > 0:
                 speaker_time[speaker] = speaker_time.get(speaker, 0) + overlap
         dominant = max(speaker_time, key=speaker_time.get) if speaker_time else "UNKNOWN"
@@ -224,20 +185,20 @@ def format_output(segments: list[dict]) -> str:
     current_speaker = None
     buffer = []
 
-    def flush():
-        if buffer:
-            ts = f"[{fmt_time(buffer[0]['start'])} → {fmt_time(buffer[-1]['end'])}]"
-            lines.append(f"\n{current_speaker}  {ts}")
-            lines.append(" ".join(s["text"] for s in buffer))
+    def flush(speaker, segs):
+        if segs:
+            ts = f"[{fmt_time(segs[0]['start'])} → {fmt_time(segs[-1]['end'])}]"
+            lines.append(f"\n{speaker}  {ts}")
+            lines.append(" ".join(s["text"] for s in segs))
 
     for seg in segments:
         if seg["speaker"] != current_speaker:
-            flush()
+            flush(current_speaker, buffer)
             current_speaker = seg["speaker"]
             buffer = [seg]
         else:
             buffer.append(seg)
-    flush()
+    flush(current_speaker, buffer)
     return "\n".join(lines).strip()
 
 
