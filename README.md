@@ -85,10 +85,11 @@ uv run transcribe_diarize.py --help
 |---|---|---|
 | `--model` | `base` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large` |
 | `--hf_token` | `$HF_TOKEN` | Hugging Face access token |
-| `--num_speakers` | auto | Number of speakers if known — improves diarization accuracy |
+| `--num_speakers` | auto | Number of speakers if known. Must be a positive integer |
 | `--output` | `<name>_transcript.txt` | Output path. Use `.json` extension for structured output |
 | `--summarize` | off | Summarize the transcript using Ollama |
 | `--ollama-model` | `llama3.2` | Ollama model for summarization |
+| `--summary-output` | stdout only | Optional file path to save the summary |
 | `--speakers` | — | Speaker names: `'Alex,Ahmed'` (by order) or `'SPEAKER_00=Alex,SPEAKER_01=Ahmed'` |
 | `--force` | off | Re-run transcription even if output file already exists |
 
@@ -109,6 +110,9 @@ uv run transcribe_diarize.py interview.m4a --output interview.json
 
 # Summarize with Ollama (requires ollama to be installed)
 uv run transcribe_diarize.py interview.m4a --summarize
+
+# Summarize and save the summary explicitly
+uv run transcribe_diarize.py interview.m4a --summarize --summary-output interview.summary.md
 
 # Summarize with speaker names (in order of appearance)
 uv run transcribe_diarize.py interview.m4a --summarize --speakers 'Alex,Ahmed'
@@ -189,6 +193,8 @@ The `--summarize` flag sends the transcript to Ollama with a prompt template (`p
 
 1. **Infers speaker identities** from context clues (introductions, names mentioned)
 2. **Produces a structured summary** with overview, key points, and action items
+
+Summaries are printed to stdout by default. If you want to keep one, pass `--summary-output path/to/summary.md`.
 
 If the LLM can't identify speakers, use `--speakers` to provide names manually:
 

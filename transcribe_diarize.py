@@ -232,6 +232,14 @@ def parse_speakers(speakers_str: str) -> dict[str, str]:
     return mapping
 
 
+def positive_int(value: str) -> int:
+    """argparse type that accepts only positive integers."""
+    parsed = int(value)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def load_prompt_template() -> str:
     """Load the summarization prompt template from prompt_summarize.txt."""
     prompt_path = Path(__file__).parent / "prompt_summarize.txt"
@@ -278,7 +286,7 @@ def main():
                         help="Whisper model size (default: base). Larger = more accurate but slower.")
     parser.add_argument("--hf_token", default=os.environ.get("HF_TOKEN"),
                         help="Hugging Face token (or set HF_TOKEN env var).")
-    parser.add_argument("--num_speakers", type=int, default=None,
+    parser.add_argument("--num_speakers", type=positive_int, default=None,
                         help="Number of speakers if known (optional, improves accuracy).")
     parser.add_argument("--output", default=None,
                         help="Output file path (default: <audio_name>_transcript.txt). Use .json for raw JSON.")
@@ -286,6 +294,8 @@ def main():
                         help="Summarize the transcript using Ollama (requires ollama to be installed).")
     parser.add_argument("--ollama-model", default="llama3.2",
                         help="Ollama model to use for summarization (default: llama3.2).")
+    parser.add_argument("--summary-output", default=None,
+                        help="Optional path to save the summary. If omitted, prints to stdout only.")
     parser.add_argument("--speakers", default=None,
                         help="Speaker names: 'Alex,Ahmed' (by order) or 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'.")
     parser.add_argument("--force", action="store_true",
@@ -321,6 +331,13 @@ def main():
                 transcript = apply_speaker_names(transcript, speaker_map)
             summary = summarize(transcript, ollama_model=args.ollama_model)
             print(f"\n{summary}\n")
+            if args.summary_output:
+                summary_file = Path(args.summary_output)
+                if summary_file.parent != Path("."):
+                    summary_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(summary_file, "w", encoding="utf-8") as f:
+                    f.write(summary + "\n")
+                print(f"Saved summary to {summary_file}")
         else:
             print("Use --force to re-run, or --summarize to summarize the existing transcript.")
         return
@@ -355,10 +372,13 @@ def main():
     if args.summarize:
         summary = summarize(transcript, ollama_model=args.ollama_model)
         print(f"\n{summary}\n")
-        summary_file = out_file.with_suffix(".summary.md")
-        with open(summary_file, "w", encoding="utf-8") as f:
-            f.write(summary + "\n")
-        print(f"Saved summary to {summary_file}")
+        if args.summary_output:
+            summary_file = Path(args.summary_output)
+            if summary_file.parent != Path("."):
+                summary_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_file, "w", encoding="utf-8") as f:
+                f.write(summary + "\n")
+            print(f"Saved summary to {summary_file}")
 
 
 if __name__ == "__main__":
