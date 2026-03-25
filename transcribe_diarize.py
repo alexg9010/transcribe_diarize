@@ -240,6 +240,22 @@ def positive_int(value: str) -> int:
     return parsed
 
 
+def prefixed_output_path(prefix: Path, suffix: str) -> Path:
+    """Build an output path from a shared prefix and filename suffix."""
+    return prefix.parent / f"{prefix.name}{suffix}"
+
+
+def load_existing_transcript(text_path: Path | None, json_path: Path | None) -> str:
+    """Load an existing transcript from text or JSON output for summarization."""
+    if text_path is not None and text_path.exists():
+        return text_path.read_text(encoding="utf-8")
+    if json_path is not None and json_path.exists():
+        data = json.loads(json_path.read_text(encoding="utf-8"))
+        segments = data["segments"] if isinstance(data, dict) else data
+        return format_output(segments)
+    raise FileNotFoundError("No transcript output found to summarize.")
+
+
 def load_prompt_template() -> str:
     """Load the summarization prompt template from prompt_summarize.txt."""
     prompt_path = Path(__file__).parent / "prompt_summarize.txt"
@@ -288,19 +304,25 @@ def main():
                         help="Hugging Face token (or set HF_TOKEN env var).")
     parser.add_argument("--num_speakers", type=positive_int, default=None,
                         help="Number of speakers if known (optional, improves accuracy).")
-    parser.add_argument("--output", default=None,
-                        help="Output file path (default: <audio_name>_transcript.txt). Use .json for raw JSON.")
+    parser.add_argument("--output-prefix", default=None,
+                        help="Prefix for generated output files (default: audio stem).")
+    parser.add_argument("--json", action="store_true",
+                        help="Also save the transcript as JSON alongside the text transcript.")
+    parser.add_argument("--only-json", action="store_true",
+                        help="Save the transcript only as JSON.")
     parser.add_argument("--summarize", action="store_true",
                         help="Summarize the transcript using Ollama (requires ollama to be installed).")
     parser.add_argument("--ollama-model", default="llama3.2",
                         help="Ollama model to use for summarization (default: llama3.2).")
-    parser.add_argument("--summary-output", default=None,
-                        help="Optional path to save the summary. If omitted, prints to stdout only.")
+    parser.add_argument("--save-summary", nargs="?", const="__DEFAULT__", default=None,
+                        help="Optionally save the summary. Pass a path, or omit the value to use <output_prefix>_summary.md.")
     parser.add_argument("--speakers", default=None,
                         help="Speaker names: 'Alex,Ahmed' (by order) or 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'.")
     parser.add_argument("--force", action="store_true",
                         help="Re-run transcription even if output file already exists.")
     args = parser.parse_args()
+    if args.json and args.only_json:
+        parser.error("--json and --only-json cannot be used together")
 
     audio_path = args.audio
     if not Path(audio_path).exists():
@@ -308,36 +330,40 @@ def main():
         sys.exit(1)
 
     stem = Path(audio_path).stem
-    out_path = args.output or f"{stem}_transcript.txt"
-    out_file = Path(out_path)
-    if out_file.parent != Path("."):
-        out_file.parent.mkdir(parents=True, exist_ok=True)
+    output_prefix = Path(args.output_prefix) if args.output_prefix else Path(stem)
+    text_output = None if args.only_json else prefixed_output_path(output_prefix, "_transcript.txt")
+    json_output = prefixed_output_path(output_prefix, "_transcript.json") if (args.json or args.only_json) else None
+    transcript_outputs = [path for path in (text_output, json_output) if path is not None]
+    for path in transcript_outputs:
+        if path.parent != Path("."):
+            path.parent.mkdir(parents=True, exist_ok=True)
 
     speaker_map = parse_speakers(args.speakers) if args.speakers else {}
+    summary_output = None
+    if args.save_summary is not None:
+        summary_output = (
+            prefixed_output_path(output_prefix, "_summary.md")
+            if args.save_summary == "__DEFAULT__"
+            else Path(args.save_summary)
+        )
 
-    if out_file.exists() and not args.force:
-        print(f"Transcript already exists: {out_file}")
+    if transcript_outputs and all(path.exists() for path in transcript_outputs) and not args.force:
+        print("Transcript outputs already exist:")
+        for path in transcript_outputs:
+            print(f"  {path}")
         if args.summarize:
             print("Reusing existing transcript for summarization...")
-            if out_path.endswith(".json"):
-                with open(out_file, encoding="utf-8") as f:
-                    data = json.load(f)
-                segments = data["segments"] if isinstance(data, dict) else data
-                transcript = format_output(segments)
-            else:
-                with open(out_file, encoding="utf-8") as f:
-                    transcript = f.read()
+            transcript = load_existing_transcript(text_output, json_output)
             if speaker_map:
                 transcript = apply_speaker_names(transcript, speaker_map)
             summary = summarize(transcript, ollama_model=args.ollama_model)
             print(f"\n{summary}\n")
-            if args.summary_output:
-                summary_file = Path(args.summary_output)
-                if summary_file.parent != Path("."):
-                    summary_file.parent.mkdir(parents=True, exist_ok=True)
-                with open(summary_file, "w", encoding="utf-8") as f:
+            if summary_output is not None:
+                if summary_output.parent != Path("."):
+                    summary_output.parent.mkdir(parents=True, exist_ok=True)
+                with open(summary_output, "w", encoding="utf-8") as f:
                     f.write(summary + "\n")
-                print(f"Saved summary to {summary_file}")
+                print(f"Saved summary to {summary_output}")
         else:
             print("Use --force to re-run, or --summarize to summarize the existing transcript.")
         return
@@ -361,24 +387,24 @@ def main():
     if speaker_map:
         transcript = apply_speaker_names(transcript, speaker_map)
 
-    if out_path.endswith(".json"):
-        with open(out_file, "w", encoding="utf-8") as f:
-            json.dump(labeled, f, indent=2, ensure_ascii=False)
-    else:
-        with open(out_file, "w", encoding="utf-8") as f:
+    if text_output is not None:
+        with open(text_output, "w", encoding="utf-8") as f:
             f.write(transcript)
-    print(f"Saved transcript to {out_file}")
+        print(f"Saved transcript to {text_output}")
+    if json_output is not None:
+        with open(json_output, "w", encoding="utf-8") as f:
+            json.dump(labeled, f, indent=2, ensure_ascii=False)
+        print(f"Saved JSON transcript to {json_output}")
 
     if args.summarize:
         summary = summarize(transcript, ollama_model=args.ollama_model)
         print(f"\n{summary}\n")
-        if args.summary_output:
-            summary_file = Path(args.summary_output)
-            if summary_file.parent != Path("."):
-                summary_file.parent.mkdir(parents=True, exist_ok=True)
-            with open(summary_file, "w", encoding="utf-8") as f:
+        if summary_output is not None:
+            if summary_output.parent != Path("."):
+                summary_output.parent.mkdir(parents=True, exist_ok=True)
+            with open(summary_output, "w", encoding="utf-8") as f:
                 f.write(summary + "\n")
-            print(f"Saved summary to {summary_file}")
+            print(f"Saved summary to {summary_output}")
 
 
 if __name__ == "__main__":
