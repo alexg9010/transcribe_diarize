@@ -25,19 +25,25 @@ Or use `--output result.json` for structured JSON with per-segment timestamps.
 
 ## Setup
 
-### 1. Install uv
+### 1. Run the installer
 
 ```bash
-# macOS / Linux
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Windows (PowerShell)
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# Or via pip / brew / winget — see https://docs.astral.sh/uv/getting-started/installation/
+./install.sh
 ```
 
-No need to manually create a virtualenv or install packages — uv reads the inline dependency metadata at the top of the script and handles everything automatically on first run.
+The installer currently supports:
+
+- macOS with Homebrew
+- Ubuntu/Debian with `apt`
+
+It will:
+
+- install required dependencies if missing: `uv`, `ffmpeg`
+- run `uv sync` to create the managed Python environment
+- detect optional `ollama` support and, in interactive terminals, ask whether to install it
+- check whether `HF_TOKEN` is already set and print the next steps if not
+
+On unsupported systems, it prints the manual commands you need and exits.
 
 > **GPU users (optional):** If you have a CUDA-capable GPU, uv will install CPU-only PyTorch by default. To get the CUDA build, install it manually into uv's managed env. The script detects and uses CUDA/MPS automatically if available.
 
@@ -64,6 +70,8 @@ set HF_TOKEN=your_token_here
 # Windows (PowerShell)
 $env:HF_TOKEN="your_token_here"
 ```
+
+The installer checks whether `HF_TOKEN` is set, but it does not write `.env` files or modify your shell profile for you.
 
 ---
 
@@ -187,7 +195,7 @@ Pass `--num_speakers N` if you know the count. Also try `--model small` or large
 
 ## Summarization
 
-Summarization uses [Ollama](https://ollama.com) to run a local LLM. Install Ollama and pull a model before using `--summarize`:
+Summarization uses [Ollama](https://ollama.com) to run a local LLM. If `ollama` is missing, `./install.sh` offers to install it in interactive terminals. You can also install it manually and pull a model before using `--summarize`:
 
 ```bash
 # Install Ollama (see https://ollama.com for other platforms)
