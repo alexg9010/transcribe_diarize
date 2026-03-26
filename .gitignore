@@ -23,5 +23,6 @@ wheels/
 *.ogg
 *.webm
 *_transcript.txt
+*_transcript.json
 *.summary.md
 *.rttm
