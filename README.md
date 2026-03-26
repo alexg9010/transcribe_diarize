@@ -28,6 +28,8 @@ Or use `--output result.json` for structured JSON with per-segment timestamps.
 ### 1. Run the installer
 
 ```bash
+git clone git@github.com:alexg9010/transcribe_diarize.git
+cd transcribe_diarize
 ./install.sh
 ```
 
