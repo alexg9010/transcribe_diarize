@@ -4,6 +4,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$SCRIPT_DIR"
+REPO_ENV_FILE="$REPO_ROOT/.env"
+PYTHON_VERSION_FILE="$REPO_ROOT/.python-version"
 
 PLATFORM=""
 PKG_MANAGER=""
@@ -29,8 +31,46 @@ add_next_step() {
   next_steps+=("$1")
 }
 
+read_pinned_python_version() {
+  if [[ -f "$PYTHON_VERSION_FILE" ]]; then
+    sed -n '1p' "$PYTHON_VERSION_FILE" | tr -d '[:space:]'
+  fi
+}
+
 command_exists() {
   command -v "$1" >/dev/null 2>&1
+}
+
+repo_env_hf_token() {
+  if [[ -f "$REPO_ENV_FILE" ]]; then
+    grep -E '^HF_TOKEN=' "$REPO_ENV_FILE" | tail -n 1 | cut -d= -f2- || true
+  fi
+}
+
+upsert_env_var() {
+  local env_file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp_file
+  local updated=0
+
+  tmp_file="$(mktemp)"
+  if [[ -f "$env_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+      if [[ "$line" == "$key="* ]]; then
+        printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+        updated=1
+      else
+        printf '%s\n' "$line" >> "$tmp_file"
+      fi
+    done < "$env_file"
+  fi
+
+  if [[ "$updated" -eq 0 ]]; then
+    printf '%s=%s\n' "$key" "$value" >> "$tmp_file"
+  fi
+
+  mv "$tmp_file" "$env_file"
 }
 
 is_tty() {
@@ -118,6 +158,51 @@ install_uv() {
   esac
 }
 
+ensure_pinned_python() {
+  local pinned_version=""
+  pinned_version="$(read_pinned_python_version)"
+
+  if [[ -z "$pinned_version" ]]; then
+    add_required_status "no repo Python pin found"
+    add_next_step "Add $PYTHON_VERSION_FILE to pin a compatible Python version for this project."
+    return 1
+  fi
+
+  printf 'Ensuring Python %s is available via uv...\n' "$pinned_version"
+  if uv python install "$pinned_version"; then
+    add_required_status "Python $pinned_version available for this repo"
+    return 0
+  fi
+
+  add_required_status "Python $pinned_version installation failed"
+  add_next_step "Install Python $pinned_version with uv, then re-run ./install.sh."
+  return 1
+}
+
+install_global_command() {
+  local pinned_version=""
+  pinned_version="$(read_pinned_python_version)"
+
+  if [[ -z "$pinned_version" ]]; then
+    add_required_status "global command install skipped because no repo Python pin was found"
+    add_next_step "Add $PYTHON_VERSION_FILE to pin a compatible Python version for this project."
+    return 1
+  fi
+
+  printf 'Installing global command transcribe-diarize...\n'
+  if (
+    cd "$REPO_ROOT"
+    UV_PYTHON="$pinned_version" uv tool install --from "$REPO_ROOT" transcribe-diarize
+  ); then
+    add_required_status "global command installed"
+    return 0
+  fi
+
+  add_required_status "global command installation failed"
+  add_next_step "Re-run ./install.sh after resolving the uv tool install failure above."
+  return 1
+}
+
 install_ffmpeg() {
   case "$PKG_MANAGER" in
     brew)
@@ -201,11 +286,55 @@ handle_optional_ollama() {
 check_hf_token() {
   if [[ -n "${HF_TOKEN:-}" ]]; then
     printf 'HF_TOKEN is set in the current environment.\n'
-  else
-    printf 'HF_TOKEN is not set.\n'
-    add_next_step "Accept the model terms at https://huggingface.co/pyannote/speaker-diarization-community-1 and https://huggingface.co/pyannote/segmentation-3.0."
-    add_next_step "Export a token before running the script: export HF_TOKEN=your_token_here"
+    return 0
   fi
+
+  local repo_token=""
+  repo_token="$(repo_env_hf_token)"
+  if [[ -n "$repo_token" ]]; then
+    printf 'HF_TOKEN found in %s.\n' "$REPO_ENV_FILE"
+    return 0
+  fi
+
+  printf 'HF_TOKEN is not configured.\n'
+  add_next_step "Accept the model terms at https://huggingface.co/pyannote/speaker-diarization-community-1 and https://huggingface.co/pyannote/segmentation-3.0."
+  add_next_step "Export a token before running the script: export HF_TOKEN=your_token_here"
+  add_next_step "Or save HF_TOKEN in $REPO_ENV_FILE."
+}
+
+prompt_for_hf_token() {
+  if [[ -n "${HF_TOKEN:-}" ]]; then
+    add_required_status "HF_TOKEN available from shell environment"
+    return 0
+  fi
+
+  local repo_token=""
+  repo_token="$(repo_env_hf_token)"
+  if [[ -n "$repo_token" ]]; then
+    add_required_status "HF_TOKEN already saved in $REPO_ENV_FILE"
+    return 0
+  fi
+
+  if is_tty; then
+    local token=""
+    printf 'HF_TOKEN is not set. '
+    printf 'Enter a Hugging Face token to save in %s (leave blank to skip): ' "$REPO_ENV_FILE"
+    read -r -s token
+    printf '\n'
+    if [[ -n "$token" ]]; then
+      upsert_env_var "$REPO_ENV_FILE" "HF_TOKEN" "$token"
+      chmod 600 "$REPO_ENV_FILE" 2>/dev/null || true
+      add_required_status "HF_TOKEN saved to $REPO_ENV_FILE"
+      return 0
+    fi
+    add_required_status "HF_TOKEN prompt skipped"
+    add_next_step "Save HF_TOKEN in $REPO_ENV_FILE or export it in your shell before transcribing."
+    return 0
+  fi
+
+  add_required_status "HF_TOKEN not configured"
+  add_next_step "Set HF_TOKEN in your shell or save it in $REPO_ENV_FILE before transcribing."
+  return 0
 }
 
 sync_python_environment() {
@@ -245,18 +374,35 @@ main() {
       setup_failed=1
     fi
 
+    if [[ "$setup_failed" -eq 0 ]]; then
+      if ! ensure_pinned_python; then
+        setup_failed=1
+      fi
+    fi
+
     if ! ensure_required_dependency ffmpeg "ffmpeg" install_ffmpeg; then
       setup_failed=1
     fi
   fi
 
   local python_env_status="skipped because required dependencies are missing"
+  local global_command_status="skipped because required dependencies are missing"
   if [[ "$setup_failed" -eq 0 ]]; then
     if sync_python_environment; then
       python_env_status="uv environment ready"
+      prompt_for_hf_token
     else
       python_env_status="uv sync failed"
       add_next_step "Resolve the uv sync failure above, then re-run ./install.sh."
+      setup_failed=1
+    fi
+  fi
+
+  if [[ "$setup_failed" -eq 0 ]]; then
+    if install_global_command; then
+      global_command_status="transcribe-diarize installed globally"
+    else
+      global_command_status="global install failed"
       setup_failed=1
     fi
   fi
@@ -272,6 +418,14 @@ main() {
 
   log_section "Python environment"
   printf -- '- %s\n' "$python_env_status"
+
+  log_section "Global command"
+  printf -- '- %s\n' "$global_command_status"
+
+  if [[ "$setup_failed" -eq 0 ]]; then
+    add_next_step "Run the command from anywhere: transcribe-diarize --help"
+    add_next_step "Refresh the global command after future edits by re-running ./install.sh."
+  fi
 
   log_section "Hugging Face token"
   check_hf_token
