@@ -1,3 +1,7 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "transcribe-diarize"
 version = "0.1.0"
@@ -14,4 +18,10 @@ dependencies = [
 ]
 
 [project.scripts]
-transcribe-diarize = "transcribe_diarize:main"
+transcribe-diarize = "transcribe_diarize_pkg.cli:main"
+
+[tool.setuptools]
+packages = ["transcribe_diarize_pkg"]
+
+[tool.setuptools.package-data]
+transcribe_diarize_pkg = ["prompt_summarize.txt"]

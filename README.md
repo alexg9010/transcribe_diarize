@@ -41,9 +41,12 @@ The installer currently supports:
 It will:
 
 - install required dependencies if missing: `uv`, `ffmpeg`
+- install the repo-pinned Python version via `uv` if needed
 - run `uv sync` to create the managed Python environment
+- install the global `transcribe-diarize` command for you
+- if `HF_TOKEN` is not set globally, prompt for it during interactive installs and save it to the repo `.env`
 - detect optional `ollama` support and, in interactive terminals, ask whether to install it
-- check whether `HF_TOKEN` is already set and print the next steps if not
+- print the next usage steps
 
 On unsupported systems, it prints the manual commands you need and exits.
 
@@ -73,17 +76,41 @@ set HF_TOKEN=your_token_here
 $env:HF_TOKEN="your_token_here"
 ```
 
-The installer checks whether `HF_TOKEN` is set, but it does not write `.env` files or modify your shell profile for you.
+If `HF_TOKEN` is not set globally, `./install.sh` will prompt for it in interactive terminals and save it to the repo `.env`. At runtime, the CLI resolves tokens in this order:
+
+1. `--hf_token`
+2. global `HF_TOKEN`
+3. repo `.env`
+
+### 4. Use the global command
+
+After `./install.sh` completes, the global command is already installed:
+
+```bash
+transcribe-diarize --help
+```
+
+After later code changes, re-run the installer to refresh the global command:
+
+```bash
+./install.sh
+```
 
 ---
 
 ## Usage
 
 ```bash
-uv run transcribe_diarize.py <audio_file> [options]
+transcribe-diarize <audio_file> [options]
 ```
 
 To see all available options:
+
+```bash
+transcribe-diarize --help
+```
+
+The direct script path still works if you prefer it during development:
 
 ```bash
 uv run transcribe_diarize.py --help
@@ -94,7 +121,7 @@ uv run transcribe_diarize.py --help
 | Flag | Default | Description |
 |---|---|---|
 | `--model` | `base` | Whisper model size: `tiny`, `base`, `small`, `medium`, `large` |
-| `--hf_token` | `$HF_TOKEN` | Hugging Face access token |
+| `--hf_token` | `$HF_TOKEN` or repo `.env` | Hugging Face access token |
 | `--num_speakers` | auto | Number of speakers if known. Must be a positive integer |
 | `--output-prefix` | `<audio_stem>` | Prefix used for generated files like `_transcript.txt`, `_transcript.json`, `_summary.md` |
 | `--json` | off | Also save the transcript as JSON |
@@ -108,38 +135,38 @@ uv run transcribe_diarize.py --help
 ### Examples
 
 ```bash
-# Basic usage (reads HF_TOKEN from env)
-uv run transcribe_diarize.py interview.m4a
+# Basic usage
+transcribe-diarize interview.m4a
 
 # Higher accuracy model
-uv run transcribe_diarize.py interview.m4a --model medium
+transcribe-diarize interview.m4a --model medium
 
 # Known speaker count
-uv run transcribe_diarize.py interview.m4a --num_speakers 2
+transcribe-diarize interview.m4a --num_speakers 2
 
 # Save both text and JSON transcripts
-uv run transcribe_diarize.py interview.m4a --json
+transcribe-diarize interview.m4a --json
 
 # Save only JSON transcript
-uv run transcribe_diarize.py interview.m4a --only-json
+transcribe-diarize interview.m4a --only-json
 
 # Summarize with Ollama (requires ollama to be installed)
-uv run transcribe_diarize.py interview.m4a --summarize
+transcribe-diarize interview.m4a --summarize
 
 # Summarize and save to the default summary path
-uv run transcribe_diarize.py interview.m4a --summarize --save-summary
+transcribe-diarize interview.m4a --summarize --save-summary
 
 # Summarize and save to a custom path
-uv run transcribe_diarize.py interview.m4a --summarize --save-summary notes/interview.md
+transcribe-diarize interview.m4a --summarize --save-summary notes/interview.md
 
 # Summarize with speaker names (in order of appearance)
-uv run transcribe_diarize.py interview.m4a --summarize --speakers 'Alex,Ahmed'
+transcribe-diarize interview.m4a --summarize --speakers 'Alex,Ahmed'
 
 # Use a different Ollama model
-uv run transcribe_diarize.py interview.m4a --summarize --ollama-model mistral
+transcribe-diarize interview.m4a --summarize --ollama-model mistral
 
 # Custom output prefix
-uv run transcribe_diarize.py interview.m4a --output-prefix outputs/interview --json --summarize --save-summary
+transcribe-diarize interview.m4a --output-prefix outputs/interview --json --summarize --save-summary
 ```
 
 ---
@@ -217,7 +244,7 @@ Summaries are printed to stdout by default. If you want to keep one, pass `--sav
 If the LLM can't identify speakers, use `--speakers` to provide names manually:
 
 ```bash
-uv run transcribe_diarize.py meeting.m4a --summarize --speakers 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
+transcribe-diarize meeting.m4a --summarize --speakers 'SPEAKER_00=Alex,SPEAKER_01=Ahmed'
 ```
 
 You can customize `prompt_summarize.txt` to change the summary format, or use a different model with `--ollama-model`.
