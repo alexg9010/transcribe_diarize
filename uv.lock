@@ -2561,7 +2561,7 @@ wheels = [
 [[package]]
 name = "transcribe-diarize"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "openai-whisper" },
     { name = "pyannote-audio" },
